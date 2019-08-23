@@ -1,5 +1,11 @@
 #include <ap_int.h>
+#include <hls_stream.h>
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+
 #define BANK 8
+typedef ap_fixed<32,32> int32;
 typedef ap_fixed<64,64> int64;
 typedef ap_fixed<512,512> CacheLine;
 struct SGD_PARAM_CONFIG {
@@ -17,3 +23,4 @@ struct SGD_PARAM_CONFIG {
       unsigned int  learning_rate;
 
 };
+void sgd_top(SGD_PARAM_CONFIG param,int64* mem_addr,CacheLine mem_data);

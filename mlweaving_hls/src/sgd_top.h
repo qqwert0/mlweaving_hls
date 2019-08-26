@@ -1,5 +1,8 @@
 #include <ap_int.h>
+<<<<<<< HEAD
 #include <ap_fixed.h>
+=======
+>>>>>>> 244a6b83fb267b44fd5cbdfabc633dd32be1a152
 #include <hls_stream.h>
 #include <stdio.h>
 #include <iostream>

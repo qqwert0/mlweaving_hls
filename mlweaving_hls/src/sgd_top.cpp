@@ -1,6 +1,6 @@
 #include "sgd_top.h"
 void rd_mem(SGD_PARAM_CONFIG param,
-		int64& mem_addr,
+		int64* mem_addr,
 		CacheLine mem_data,
 		stream<ap_uint<256> >&  BDataFifo,
 		stream<ap_uint<512> >&  ADataFifo,
@@ -26,8 +26,8 @@ void rd_mem(SGD_PARAM_CONFIG param,
 		break;
 	case READ_B:
 		if(!BDataFifo.full()){
-			mem_addr = param.addr_b + (sample_index<<6);
-			if(sample_index%2)
+			*mem_addr = param.addr_b + (sample_index<<4);
+			if(sample_index(3,3))
 				BDataFifo.write(mem_data(511,256));
 			else
 				BDataFifo.write(mem_data(255,0));
@@ -39,7 +39,7 @@ void rd_mem(SGD_PARAM_CONFIG param,
 		break;
 	case READ_A:
 		if(!ADataFifo.full()){
-			mem_addr = param.addr_a + (sample_index>>1);
+			*mem_addr = param.addr_a + (sample_index*param.dimension/16) + dimension_index/2 + bits_index;
 			ADataFifo.write(mem_data);
 			bits_index++;
 			if(bits_index == param.number_of_bits && dimension_index >= param.dimension){
@@ -66,7 +66,7 @@ void rd_mem(SGD_PARAM_CONFIG param,
 		}
 		break;
 	case EPOCH_END:
-		if(epochs_index == param.number_of_epochs){
+		if(epochs_index == param.number_of_epochs-1){
 			RdMemFsmState = FSM_END;
 			epochs_index = 0;
 			sample_index = 0;
@@ -133,10 +133,10 @@ void dot_product(SGD_PARAM_CONFIG param,
 	case CALC:
 		for(int i=0;i< BANK;i++){
 #pragma HLS unroll factor=8
-			Q(i*32+31,i*32) = Q(i*32+31,i*32) + ADataTemp[i*64+bit_index] * x[dimension_index/64][bit_index];
+			Q(i*32+31,i*32) = Q(i*32+31,i*32) + ADataTemp[i*64+bit_index] * (x[dimension_index/64][bit_index]>>bits_index);
 			bit_index++;
 			if(bit_index == 64){
-				DotProductState=START;
+				DotProductState=JUDGE;
 			}
 			else{
 				DotProductState=CALC;
@@ -153,6 +153,7 @@ void dot_product(SGD_PARAM_CONFIG param,
 				dimension_index =0;
 				QFifo.write(Q);
 				Q = 0;
+				DotProductState = START;
 				if(sample_index >= param.number_of_samples){
 					DotProductState = EPOCH_END;
 				}
@@ -163,7 +164,7 @@ void dot_product(SGD_PARAM_CONFIG param,
 		}
 		break;
 	case EPOCH_END:
-		if(epochs_index == param.number_of_epochs){
+		if(epochs_index == param.number_of_epochs-1){
 			DotProductState = FSM_END;
 			epochs_index = 0;
 			sample_index = 0;
@@ -210,7 +211,7 @@ void gradient(SGD_PARAM_CONFIG param,
 
 #pragma HLS pipeline
 
-	enum GradientFsmStateType {IDLE, START, CALC, JUDGE, EPOCH_END, FSM_END};
+	enum GradientFsmStateType {IDLE, READ_SCALE, READ_A, CALC, JUDGE, EPOCH_END, FSM_END};
 	static GradientFsmStateType GradientState = IDLE;
 	static int epochs_index;
 	static int batch_index;
@@ -221,12 +222,11 @@ void gradient(SGD_PARAM_CONFIG param,
 	ap_uint<512> ADataTemp;
 	ap_uint<256> scale;
 	static ap_uint<32> G[64];
-#pragma HLS ARRAY_RESHAPE variable=G complete dim=1
 	switch (GradientState)
 	{
 	case IDLE:
 		if(start){
-			GradientState = START;
+			GradientState = READ_SCALE;
 			epochs_index = 0;
 			batch_index = 0;
 			sample_index = 0;
@@ -235,26 +235,38 @@ void gradient(SGD_PARAM_CONFIG param,
 			bit_index = 0;
 		}
 		break;
-	case START:
-		if(!A2DataFifo.empty() && !scaleFifo.empty()){
-			A2DataFifo.read(ADataTemp);
+	case READ_SCALE:
+		if(!scaleFifo.empty()){
 			scaleFifo.read(scale);
+			bits_index++;
+			GradientState=READ_A;
+		}
+		else
+			GradientState = READ_SCALE;
+		break;
+	case READ_A:
+		if(!A2DataFifo.empty()){
+			A2DataFifo.read(ADataTemp);
 			bits_index++;
 			GradientState=CALC;
 		}
 		else
-			GradientState = START;
+			GradientState = READ_A;
 		break;
 	case CALC:
 		for(int i=0;i< BANK;i++){
 #pragma HLS unroll factor=8
-			if(bits_index == param.number_of_bits){
+			if(bits_index == 1){
 				G[bit_index] = ADataTemp[i*64+bit_index]*(scale[i]>>bits_index) ;
 			}
 			else{
 				G[bit_index] = G[bit_index] +  ADataTemp[i*64+bit_index]*(scale[i]>>bits_index) ;
 			}
 		}
+		if(bits_index == param.number_of_bits){
+			GFifo.write(G[bit_index]);
+		}
+		bit_index++;
 		if(bit_index == 64){
 			GradientState=JUDGE;
 			bit_index = 0;
@@ -262,20 +274,17 @@ void gradient(SGD_PARAM_CONFIG param,
 		else{
 			GradientState=CALC;
 		}
-		if(bits_index == param.number_of_bits){
-			GFifo.write(G[bit_index]);
-		}
-		bit_index++;
 		break;
 	case JUDGE:
 		if(bits_index == param.number_of_bits){
 			bits_index = 0;
 			dimension_index = dimension_index + 64;
-			GradientState = START;
+			GradientState = READ_A;
 			if(dimension_index >= param.dimension){
 				sample_index = sample_index + BANK;
 				batch_index = batch_index + BANK;
 				dimension_index =0;
+				GradientState = READ_SCALE;
 				if(batch_index >= param.mini_batch_size){
 					batch_index = 0;
 				}
@@ -285,17 +294,17 @@ void gradient(SGD_PARAM_CONFIG param,
 			}
 		}
 		else{
-			GradientState = START;
+			GradientState = READ_A;
 		}
 		break;
 	case EPOCH_END:
-		if(epochs_index == param.number_of_epochs){
+		if(epochs_index == param.number_of_epochs-1){
 			GradientState = FSM_END;
 			epochs_index = 0;
 			sample_index = 0;
 		}
 		else{
-			GradientState = START;
+			GradientState = READ_SCALE;
 			sample_index = 0;
 			epochs_index++;
 		}
@@ -306,26 +315,128 @@ void gradient(SGD_PARAM_CONFIG param,
 	}
 }
 
+
 void updata_x(SGD_PARAM_CONFIG param,
 	stream<ap_uint<32> >&  GFifo,
-	ap_uint<32> x[512][64],
-	ap_uint<32> x_updata[512][64]
+	ap_uint<32> x_updata[512][64],
+	stream<ap_uint<32> >& XupdataFifo
 	){
 #pragma HLS pipeline
-#pragma HLS ARRAY_RESHAPE variable=x complete dim=2
-#pragma HLS ARRAY_RESHAPE variable=x_updata complete dim=2
-	static int dimension_index = 0;
+//#pragma HLS ARRAY_RESHAPE variable=x complete dim=2
+//#pragma HLS ARRAY_RESHAPE variable=x_updata complete dim=2
+#pragma HLS dependence variable=x_updata inter false
+#pragma HLS dependence variable=x inter false
+	//static int wr_dimension_index = 0;
+	static int rd_dimension_index = 0;
+	static int wr_dimension_index = 0;
+	static int epochs_index;
+	static int batch_index = 0;
+	static int sample_index;
+	static ap_uint<32> x_updata_temp1;
+	static ap_uint<32> x_updata_temp2;
 	static ap_uint<32> G;
 	if(!GFifo.empty()){
+		x_updata_temp1 = x_updata[rd_dimension_index/64][rd_dimension_index%64];
+		rd_dimension_index++;
 		GFifo.read(G);
-		x_updata[dimension_index/64][dimension_index%64] = x[dimension_index/64][dimension_index%64] - G/param.mini_batch_size;
-		x[dimension_index/64][dimension_index%64] = x_updata[dimension_index/64][dimension_index%64];
-		dimension_index ++;
-		if(dimension_index == param.dimension){
-			dimension_index = 0;
+		x_updata_temp2 = x_updata_temp1 - G/param.mini_batch_size;
+		x_updata[wr_dimension_index/64][wr_dimension_index%64] = x_updata_temp2;
+		if(batch_index + BANK >= param.mini_batch_size){
+			XupdataFifo.write(x_updata_temp2);
+		}
+		wr_dimension_index = rd_dimension_index;
+		if(rd_dimension_index == param.dimension){
+			rd_dimension_index = 0;
+			wr_dimension_index = 0;
+			batch_index = batch_index + BANK;
+			if(batch_index >= param.mini_batch_size){
+				batch_index = 0;
+			}
 		}
 	}
 }
+
+void wr_x(SGD_PARAM_CONFIG param,
+		ap_uint<32> x[512][64],
+		stream<ap_uint<32> >& XupdataFifo,
+		int64& mem_wr_addr,
+		CacheLine* mem_wr_data,
+		bool start
+		){
+#pragma HLS pipeline
+#pragma HLS ARRAY_RESHAPE variable=x complete dim=2
+//#pragma HLS dependence variable=x inter false
+	enum WrxFsmStateType {IDLE, START, UPDATA_X, JUDGE, EPOCH_END, FSM_END};
+	static WrxFsmStateType WrxState = IDLE;
+	static int epochs_index;
+	static int batch_index;
+	static int sample_index;
+	static int dimension_index;
+	static ap_uint<32> x_updata_temp;
+	switch (WrxState)
+	{
+	case IDLE:
+		if(start){
+			WrxState = START;
+			epochs_index = 0;
+			sample_index = 0;
+			dimension_index = 0;
+		}
+		break;
+	case START:
+		WrxState = UPDATA_X;
+		break;
+	case UPDATA_X:
+		if(!XupdataFifo.empty()){
+			XupdataFifo.read(x_updata_temp);
+			x[dimension_index/64][dimension_index%64] = x_updata_temp;
+			if((epochs_index == param.number_of_epochs-1) && (sample_index >= param.number_of_samples-BANK)){
+				mem_wr_addr = param.addr_model + dimension_index/16;
+				int temp = dimension_index%16;
+				(*mem_wr_data).range(temp*32+31,temp*32) = x_updata_temp;
+			}
+			dimension_index++;
+			if(dimension_index >= param.dimension){
+				dimension_index = 0;
+				sample_index = sample_index + BANK;
+				WrxState=JUDGE;
+			}
+			else{
+				WrxState=UPDATA_X;
+			}
+		}
+		else{
+			WrxState = UPDATA_X;
+		}
+
+		WrxState = START;
+		break;
+	case JUDGE:
+		if(sample_index >= param.number_of_samples){
+			sample_index = 0;
+			WrxState=EPOCH_END;
+		}
+		else{
+			WrxState=START;
+		}
+		break;
+	case EPOCH_END:
+		if(epochs_index == param.number_of_epochs-1){
+			WrxState = FSM_END;
+			epochs_index = 0;
+		}
+		else{
+			WrxState = START;
+			epochs_index++;
+		}
+		break;
+	case FSM_END:
+		WrxState = IDLE;
+		break;
+	}
+}
+
+
 
 /*
 
@@ -380,11 +491,13 @@ void gradient(SGD_PARAM_CONFIG param,
 }
 */
 
-void sgd_top(SGD_PARAM_CONFIG param,int64* mem_addr,CacheLine mem_data,bool start)
+void sgd_top(SGD_PARAM_CONFIG param,int64* mem_rd_addr,CacheLine mem_rd_data,int64* mem_wr_addr,CacheLine* mem_wr_data,bool start)
 {
-#pragma HLS INTERFACE ap_ovld port=mem_addr
+#pragma HLS INTERFACE ap_ovld port=mem_rd_addr
 #pragma HLS INTERFACE ap_vld port=param
-#pragma HLS INTERFACE ap_vld port=mem_data
+#pragma HLS INTERFACE ap_vld port=mem_rd_data
+#pragma HLS INTERFACE ap_ovld port=mem_wr_addr
+#pragma HLS INTERFACE ap_ovld port=mem_wr_data
 #pragma HLS DATAFLOW
 
 	  static hls::stream<ap_uint<512> >     ADataFifo("ADataFifo");
@@ -402,6 +515,10 @@ void sgd_top(SGD_PARAM_CONFIG param,int64* mem_addr,CacheLine mem_data,bool star
 	  #pragma HLS STREAM variable=scaleFifo depth=4
 
 
+	  static hls::stream<ap_uint<32> >     XupdataFifo("XupdataFifo");
+	  #pragma HLS STREAM variable=XupdataFifo depth=4
+//	  #pragma HLS DATA_PACK variable=XupdataFifo
+
 	static ap_uint<32> x[512][64];
 	static ap_uint<32> x_updata[512][64];
 
@@ -411,13 +528,16 @@ void sgd_top(SGD_PARAM_CONFIG param,int64* mem_addr,CacheLine mem_data,bool star
 #pragma HLS ARRAY_RESHAPE variable=x_updata complete dim=2
 
 
-	rd_mem( param,*mem_addr,mem_data,BDataFifo,ADataFifo,start);
+	rd_mem(param,mem_rd_addr,mem_rd_data,BDataFifo,ADataFifo,start);
 
-	dot_product(param,ADataFifo,A2DataFifo,QFifo,start,&x[64]);
+	dot_product(param,ADataFifo,A2DataFifo,QFifo,start,x);
 
 	serial_loss(param,BDataFifo,QFifo,scaleFifo);
 
 	gradient(param,scaleFifo,A2DataFifo,GFifo,start);
 
-	updata_x(param,GFifo,&x[64],&x_updata[64]);
+	updata_x(param,GFifo,x_updata,XupdataFifo);
+
+	wr_x(param,x,XupdataFifo,*mem_wr_addr,mem_wr_data,start);
+
 }

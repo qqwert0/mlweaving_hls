@@ -24,4 +24,7 @@ struct SGD_PARAM_CONFIG {
       unsigned int  learning_rate;
 
 };
+struct X_UINT {
+	ap_uint<32> x[64];
+};
 void sgd_top(SGD_PARAM_CONFIG param,int64* mem_addr,CacheLine mem_data,bool start);

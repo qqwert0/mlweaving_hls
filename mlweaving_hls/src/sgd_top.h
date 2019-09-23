@@ -8,11 +8,11 @@ using namespace hls;
 #define BANK 8
 typedef ap_fixed<32,32> int32;
 typedef ap_fixed<64,64> int64;
-typedef ap_fixed<512,512> CacheLine;
+typedef ap_uint<512> CacheLine;
 struct SGD_PARAM_CONFIG {
-	  int64      addr_a;                       //8  63:0
-	  int64      addr_b;                       //8  127:64
-	  int64      addr_model;                   //8  191:128
+	int      addr_a;                       //8  63:0
+	int      addr_b;                       //8  127:64
+	int      addr_model;                   //8  191:128
 
       unsigned int  mini_batch_size;         //4       223:192
       unsigned int  step_size;               //4  //8  255:224
@@ -27,4 +27,4 @@ struct SGD_PARAM_CONFIG {
 struct X_UINT {
 	ap_uint<32> x[64];
 };
-void sgd_top(SGD_PARAM_CONFIG param,int64* mem_addr,CacheLine mem_data,bool start);
+void sgd_top(SGD_PARAM_CONFIG param,int* mem_rd_addr,CacheLine mem_rd_data,int* mem_wr_addr,CacheLine* mem_wr_data,bool start,int* sample_index,bool* done);

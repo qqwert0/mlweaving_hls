@@ -1,6 +1,6 @@
 #include "sgd_top.h"
 void rd_mem(SGD_PARAM_CONFIG param,
-		int64* mem_addr,
+		int* mem_addr,
 		CacheLine mem_data,
 		stream<ap_uint<256> >&  BDataFifo,
 		stream<ap_uint<512> >&  ADataFifo,
@@ -14,49 +14,62 @@ void rd_mem(SGD_PARAM_CONFIG param,
 	static ap_uint<32> sample_index;
 	static int dimension_index;
 	static int bits_index;
+	static int dimension_algin = 0;
+
+
 
 	switch (RdMemFsmState)
 	{
 	case IDLE:
-		if(start)
+		if(start){
 			RdMemFsmState = START;
+			epochs_index = 0;
+			batch_index = 0;
+			sample_index = 0;
+			dimension_index = 0;
+			bits_index = 0;
+		}
 		break;
 	case START:
 		RdMemFsmState = READ_B;
+		dimension_algin = (param.dimension%64 == 0)? param.dimension :(param.dimension/64 + 1)*64;
+		*mem_addr = param.addr_b + (sample_index>>4);
 		break;
 	case READ_B:
 		if(!BDataFifo.full()){
-			*mem_addr = param.addr_b + (sample_index<<4);
 			if(sample_index(3,3))
 				BDataFifo.write(mem_data(511,256));
 			else
 				BDataFifo.write(mem_data(255,0));
-			sample_index = sample_index + BANK;
 			RdMemFsmState = READ_A;
+			*mem_addr = param.addr_a + (sample_index*dimension_algin/16) + dimension_index/2 + bits_index;
 		}
 		else
 			RdMemFsmState = READ_B;
 		break;
 	case READ_A:
 		if(!ADataFifo.full()){
-			*mem_addr = param.addr_a + (sample_index*param.dimension/16) + dimension_index/2 + bits_index;
 			ADataFifo.write(mem_data);
 			bits_index++;
-			if(bits_index == param.number_of_bits && dimension_index >= param.dimension){
-				bits_index = 0;
-				dimension_index =0;
-				if(sample_index >= param.number_of_samples){
-					RdMemFsmState = EPOCH_END;
-				}
-				else
-					RdMemFsmState = READ_B;
-			}
-			else if(bits_index == param.number_of_bits){
+			if(bits_index == param.number_of_bits){
 				RdMemFsmState = READ_A;
 				bits_index = 0;
 				dimension_index = dimension_index + 64;
+				*mem_addr = param.addr_a + (sample_index*dimension_algin/16) + dimension_index/2 + bits_index;
+				if(dimension_index >= param.dimension){
+					dimension_index =0;
+					sample_index = sample_index + BANK;
+					if(sample_index >= param.number_of_samples){
+						RdMemFsmState = EPOCH_END;
+					}
+					else{
+						RdMemFsmState = READ_B;
+						*mem_addr = param.addr_b + (sample_index>>4);
+					}
+				}
 			}
 			else{
+				*mem_addr = param.addr_a + (sample_index*dimension_algin/16) + dimension_index/2 + bits_index;
 				RdMemFsmState = READ_A;
 			}
 
@@ -74,6 +87,7 @@ void rd_mem(SGD_PARAM_CONFIG param,
 		else{
 			RdMemFsmState = READ_B;
 			sample_index = 0;
+			*mem_addr = param.addr_b + (sample_index>>4);
 			epochs_index++;
 		}
 		break;
@@ -90,7 +104,8 @@ void dot_product(SGD_PARAM_CONFIG param,
 		stream<ap_uint<512> >&  A2DataFifo,
 		stream<ap_uint<256> >&  QFifo,
 		bool start,
-		ap_uint<32> x[512][64])
+		ap_uint<32> x[512][64],
+		int &sample_index)
 {
 #pragma HLS ARRAY_RESHAPE variable=x complete dim=2
 #pragma HLS pipeline
@@ -99,7 +114,7 @@ void dot_product(SGD_PARAM_CONFIG param,
 	static DotProductFsmStateType DotProductState = IDLE;
 	static int epochs_index;
 	static int batch_index;
-	static int sample_index;
+	//static int sample_index;
 	static int dimension_index;
 	static int bits_index;
 	static int bit_index;
@@ -331,7 +346,7 @@ void updata_x(SGD_PARAM_CONFIG param,
 	static int wr_dimension_index = 0;
 	static int epochs_index;
 	static int batch_index = 0;
-	static int sample_index;
+	//static int sample_index;
 	static ap_uint<32> x_updata_temp1;
 	static ap_uint<32> x_updata_temp2;
 	static ap_uint<32> G;
@@ -359,9 +374,10 @@ void updata_x(SGD_PARAM_CONFIG param,
 void wr_x(SGD_PARAM_CONFIG param,
 		ap_uint<32> x[512][64],
 		stream<ap_uint<32> >& XupdataFifo,
-		int64& mem_wr_addr,
+		int& mem_wr_addr,
 		CacheLine* mem_wr_data,
-		bool start
+		bool start,
+		bool& done
 		){
 #pragma HLS pipeline
 #pragma HLS ARRAY_RESHAPE variable=x complete dim=2
@@ -381,6 +397,7 @@ void wr_x(SGD_PARAM_CONFIG param,
 			epochs_index = 0;
 			sample_index = 0;
 			dimension_index = 0;
+			done = 0;
 		}
 		break;
 	case START:
@@ -408,8 +425,6 @@ void wr_x(SGD_PARAM_CONFIG param,
 		else{
 			WrxState = UPDATA_X;
 		}
-
-		WrxState = START;
 		break;
 	case JUDGE:
 		if(sample_index >= param.number_of_samples){
@@ -431,6 +446,7 @@ void wr_x(SGD_PARAM_CONFIG param,
 		}
 		break;
 	case FSM_END:
+		done = 1;
 		WrxState = IDLE;
 		break;
 	}
@@ -438,66 +454,16 @@ void wr_x(SGD_PARAM_CONFIG param,
 
 
 
-/*
-
-void dot_product(SGD_PARAM_CONFIG param,
-		int64& mem_addr,
-		CacheLine mem_data,
-		hls::stream<CacheLine>&  CacheLineFifo,
-		int Q[BANK],
-		ap_uint<512> x[512][4])
-{
-#pragma HLS ARRAY_RESHAPE variable=x complete dim=2
-
-	for(int k = 0;k < param.number_of_bits;k++)
-	{
-#pragma HLS pipeline
-		int temp;
-		mem_addr = param.addr_a + (cur_sample<<6) + k;
-		CacheLineFifo.write(mem_data);
-		for(int i = 0;i < BANK; i++)
-		{
-#pragma HLS unroll factor=8
-			for(int n = 0;n<64;n++)
-			{
-				temp = x[n/16](((n%16)*32+31),(n%16)*32);
-				Q[i] = Q[i] +  mem_data[i*64+n]*(temp>>k);
-			}
-		}
-	}
-}
-
-void gradient(SGD_PARAM_CONFIG param,
-		hls::stream<CacheLine>&  CacheLineFifo,
-		int *scale,
-		ap_uint<512> G[4])
-{
-#pragma HLS ARRAY_RESHAPE variable=G complete dim=1
-
-	CacheLine a_data;
-	for(int k = 0;k < param.number_of_bits;k++)
-	{
-#pragma HLS pipeline
-		a_data = CacheLineFifo.read();
-		for(int i = 0;i < BANK; i++)
-		{
-#pragma HLS unroll factor=8
-			for(int n = 0;n<64;n++)
-			{
-				G[n/16]((n%16)*32+31,(n%16)*32) = G[n/16]((n%16)*32+31,(n%16)*32) +  a_data[i*64+n]*(scale[i]>>k) ;
-			}
-		}
-	}
-}
-*/
-
-void sgd_top(SGD_PARAM_CONFIG param,int64* mem_rd_addr,CacheLine mem_rd_data,int64* mem_wr_addr,CacheLine* mem_wr_data,bool start)
+void sgd_top(SGD_PARAM_CONFIG param,int* mem_rd_addr,CacheLine mem_rd_data,int* mem_wr_addr,CacheLine* mem_wr_data,bool start,int* sample_index,bool* done)
 {
 #pragma HLS INTERFACE ap_ovld port=mem_rd_addr
 #pragma HLS INTERFACE ap_vld port=param
 #pragma HLS INTERFACE ap_vld port=mem_rd_data
 #pragma HLS INTERFACE ap_ovld port=mem_wr_addr
 #pragma HLS INTERFACE ap_ovld port=mem_wr_data
+#pragma HLS INTERFACE ap_vld port=start
+#pragma HLS INTERFACE ap_ovld port=done
+#pragma HLS INTERFACE ap_ovld port=sample_index
 #pragma HLS DATAFLOW
 
 	  static hls::stream<ap_uint<512> >     ADataFifo("ADataFifo");
@@ -530,7 +496,7 @@ void sgd_top(SGD_PARAM_CONFIG param,int64* mem_rd_addr,CacheLine mem_rd_data,int
 
 	rd_mem(param,mem_rd_addr,mem_rd_data,BDataFifo,ADataFifo,start);
 
-	dot_product(param,ADataFifo,A2DataFifo,QFifo,start,x);
+	dot_product(param,ADataFifo,A2DataFifo,QFifo,start,x,*sample_index);
 
 	serial_loss(param,BDataFifo,QFifo,scaleFifo);
 
@@ -538,6 +504,6 @@ void sgd_top(SGD_PARAM_CONFIG param,int64* mem_rd_addr,CacheLine mem_rd_data,int
 
 	updata_x(param,GFifo,x_updata,XupdataFifo);
 
-	wr_x(param,x,XupdataFifo,*mem_wr_addr,mem_wr_data,start);
+	wr_x(param,x,XupdataFifo,*mem_wr_addr,mem_wr_data,start,*done);
 
 }

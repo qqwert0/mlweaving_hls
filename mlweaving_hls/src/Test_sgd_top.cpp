@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
   uint32_t dataset_index         = argc > 1 ? atoi(argv[1]) : 0; //default set to 0...
   uint32_t exec_model            = argc > 2 ? atoi(argv[2]) : 1; //default set to 0...
   uint32_t numberOfBits          = argc > 3 ? atoi(argv[3]) : 8; //default set to 0...;
-  uint32_t numberOfIterations    = argc > 4 ? atoi(argv[4]) : 1; //3;
+  uint32_t numberOfIterations    = argc > 4 ? atoi(argv[4]) : 5; //3;
   uint32_t stepSizeShifter       = argc > 5 ? atoi(argv[5]) : 12;//10;
   uint32_t mini_batch_size       = argc > 6 ? atoi(argv[6]) : 8;
   uint32_t num_fractional_bits   = argc > 7 ? atoi(argv[7]) : 23;

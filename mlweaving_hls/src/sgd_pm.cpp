@@ -907,9 +907,11 @@ void zipml_sgd_pm::a_perform_bitweaving_fpga(void) {
 void zipml_sgd_pm::b_normalize(char toMinus1_1, char binarize_b, int shift_bits) 
 {
 	//b_normalizedToMinus1_1 = toMinus1_1;
-	//for (int i = 0; i < 10; i++)
-	//	printf("b[%d] = %d\n", i, dr_b[i]);
-	if (binarize_b == 100)
+	for (int i = 0; i < 10; i++){
+		cout << "dr_b before "  << dr_b[i] << endl;
+		cout << "dr_bi before "  << dr_bi[i] << endl;
+	}
+	/*if (binarize_b == 100)
 	{
 		for (int i = 0; i < dr_numSamples; i++) 
 		{
@@ -932,8 +934,12 @@ void zipml_sgd_pm::b_normalize(char toMinus1_1, char binarize_b, int shift_bits)
 	
 			dr_bi[i] = ( ((int)dr_b[i])<<shift_bits ); //(int)(dr_b[i]*(float)b_toBinarizeTo);
 		}
-	}
+	}*/
 
+	for (int i = 0; i < 10; i++){
+		cout << "dr_b after  "  << dr_b[i] << endl;
+		cout << "dr_bi after  "  << dr_bi[i] << endl;
+	}
 
 	dr_b_min   =  0.0;
 	dr_b_range =  1.0;
@@ -1020,16 +1026,19 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 	CacheLine mem_rd_data;
 	CacheLine mem_wr_data;
 	int sample_index;
+	int count1,count2;
 	bool start = 1;
 	bool done;
 	bool done_r =0;
 
 
-	while(done_r==0)
+	while(done_r == 0)
 	{
-		sgd_top(afu_cfg,&mem_rd_addr,mem_rd_data,&mem_wr_addr,&mem_wr_data,start,&sample_index,&done);
+		sgd_top(afu_cfg,&mem_rd_addr,mem_rd_data,&mem_wr_addr,&mem_wr_data,start,&sample_index,&done,&count1,&count2);
 		//printf("mem_rd_addr = %d\n", mem_rd_addr);
-		cout << "sample_index" << sample_index << endl;
+		cout << "sample_index:" << sample_index << endl;
+		cout <<"count1: " << count1 << endl;
+		cout <<"count2: " << count2 << endl;
 		if(start){
 			start = 0;
 		}

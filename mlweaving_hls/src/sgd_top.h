@@ -27,4 +27,4 @@ struct SGD_PARAM_CONFIG {
 struct X_UINT {
 	ap_uint<32> x[64];
 };
-void sgd_top(SGD_PARAM_CONFIG param,int* mem_rd_addr,CacheLine mem_rd_data,int* mem_wr_addr,CacheLine* mem_wr_data,bool start,int* sample_index,bool* done);
+void sgd_top(SGD_PARAM_CONFIG param,int* mem_rd_addr,CacheLine mem_rd_data,int* mem_wr_addr,CacheLine* mem_wr_data,bool start,int* sample_index,bool* done,int* count1,int* count2);

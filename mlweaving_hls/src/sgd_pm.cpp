@@ -22,6 +22,7 @@ zipml_data_representation is mainly
 #include <stdlib.h>     /* srand, rand */
 #include <time.h>       /* time */
 #include <string.h>
+using namespace std;
 
 #include "sgd_pm.h"
 
@@ -233,6 +234,9 @@ void zipml_sgd_pm::load_dense_data(char* pathToFile, uint32_t numSamples, uint32
 void mlweaving_on_sample(uint32_t *dest, uint32_t *src, uint32_t numSamples, uint32_t numFeatures)
 {
 	uint32_t address_index         = 0;
+	//for(int i=0;i<100;i++){
+	//	cout << "src:" << src[i] << endl;
+	//}
 	///Do the bitWeaving to the training data...
 	for (uint32_t i = 0; i < numSamples; i+=NUM_BANKS)
 	{
@@ -277,6 +281,9 @@ void mlweaving_on_sample(uint32_t *dest, uint32_t *src, uint32_t numSamples, uin
 			}
 		}
 	}
+	//for(int i=0;i<100;i++){
+	//	cout << "dest:" << dest[i] << endl;
+	//}
 }
 
 /////////////Load the data from file with .tsv type////////////
@@ -400,11 +407,13 @@ void zipml_sgd_pm::load_libsvm_data(char* pathToFile, uint32_t _numSamples, uint
 					if (pos2 == -1) 
 					{
 						pos2 = line.length()+1;
-						dr_a[index*dr_numFeatures + column] = stof(line.substr(pos1, pos2-pos1), NULL);
+						dr_a[index*dr_numFeatures + column-1] = stof(line.substr(pos1, pos2-pos1), NULL);
 					}
 					else{
-						dr_a[index*dr_numFeatures + column] = stof(line.substr(pos1, pos2-pos1), NULL);
+						dr_a[index*dr_numFeatures + column-1] = stof(line.substr(pos1, pos2-pos1), NULL);
 					}
+					//cout << "index*dr_numFeatures + column: "  << index*dr_numFeatures + column-1 << endl;
+					//cout << "dr_a[index*dr_numFeatures + column]: "  << dr_a[index*dr_numFeatures + column-1] << endl;
 				}
 			}
 			index++;
@@ -801,6 +810,10 @@ void zipml_sgd_pm::a_normalize(void)
 			  	
 			  	dr_a_norm_fp[i*dr_numFeatures + j] = tmp;
 			  	dr_a_norm[i*dr_numFeatures + j]    = (uint32_t) (tmp * 4294967295.0); //4294967296 = 2^32
+			  	cout << "i*dr_numFeatures + j "  << i*dr_numFeatures + j << endl;
+			  	//cout << "dr_a "  << dr_a[i*dr_numFeatures + j] << endl;
+			  	cout << "dr_a_norm_fp "  << dr_a_norm_fp[i*dr_numFeatures + j] << endl;
+			  	//cout << "dr_a_norm "  << dr_a_norm[i*dr_numFeatures + j] << endl;
 /*
 				uint32_t tmp_buffer[4];
 				( (float *)tmp_buffer )[0] = tmp;
@@ -936,11 +949,6 @@ void zipml_sgd_pm::b_normalize(char toMinus1_1, char binarize_b, int shift_bits)
 		}
 	}*/
 
-	for (int i = 0; i < 10; i++){
-		cout << "dr_b after  "  << dr_b[i] << endl;
-		cout << "dr_bi after  "  << dr_bi[i] << endl;
-	}
-
 	dr_b_min   =  0.0;
 	dr_b_range =  1.0;
 
@@ -969,6 +977,10 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
     /////1:::Setup FPGA/////
     //1.1: set up afu augument configuration for the SGD on FPGA
 	SGD_PARAM_CONFIG  afu_cfg ;//       = (struct SGD_PARAM_CONFIG*)( malloc( sizeof(SGD_PARAM_CONFIG) ));
+	stream<CacheLine>	a_rd_data("a_rd_data");
+	stream<ap_uint<256> > b_rd_data("b_rd_data");
+	stream<X_UINT> Xupload("Xupload");
+
     /*if (afu_cfg == NULL)
     {
     	printf("Malloc afu_cfg in the FPGA memory space failed in bitFSGD\n");
@@ -998,16 +1010,17 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
     afu_cfg.dimension               = dr_numFeatures;       // add the predicator "b"
     afu_cfg.number_of_samples       = dr_numSamples;        // 1;
     afu_cfg.number_of_bits          = number_of_bits;		 // doGather; No use of this feature, since the data is from the same dataset.
+    afu_cfg.learning_rate			= 1;
     //afu_cfg->binarize_b_value        = 0;
    // afu_cfg->b_value_to_binarize_to  = 0.0;
     //afu_cfg->gather_depth            = 0;                    //gatherDepth: No use of this feature.
 	//afu_cfg->number_of_CL_to_process = 1;                    //No use of this feature. Can be replaced.
 
-	/*for(int i=0;i<100;i++){
-	printf("a_bitweaving_fpga = %d\n", a_bitweaving_fpga[i]);
-	printf("bi_fpga = %d\n", bi_fpga[i]);
+	for(int i=0;i<100;i++){
+		cout << "a_bitweaving_fpga" << i << ":" << a_bitweaving_fpga[i] << endl;
+		cout << "bi_fpga:" << bi_fpga[i] << endl;
 	}
-	printf("x_fpga = %d\n", x_fpga[1]);*/
+	//printf("x_fpga = %d\n", x_fpga[1]);
     printf("a_bitweaving_fpga = %d\n", a_bitweaving_fpga);
     printf("bi_fpga = %d\n", bi_fpga);
     printf("x_fpga = %d\n", x_fpga);
@@ -1021,43 +1034,178 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
     printf("afu_cfg.number_of_samples = %d\n", afu_cfg.number_of_samples);
     printf("afu_cfg.number_of_bits = %d\n", afu_cfg.number_of_bits);
 
-	int mem_rd_addr;
-	int mem_wr_addr;
-	CacheLine mem_rd_data;
-	CacheLine mem_wr_data;
+	int a_rd_addr=0;
+	int b_rd_addr=0;
+	int mem_wr_addr=0;
+	int dimension_algin;
+	int dimension_index_a = 0;
+	int bits_index_a = 0;
+	int epochs_index_a = 0;
+	int dimension_index_b = 0;
+	int bits_index_b = 0;
+	int epochs_index_b = 0;
+	//CacheLine mem_rd_data;
+	//CacheLine mem_wr_data;
+    CacheLine a_rd_data_temp;
+    ap_uint<256> b_rd_data_temp;
+    X_UINT x_model_temp;
+    int a_sample_cnt = 0;
+    int b_sample_cnt = 0;
+    int x_sample_cnt = 0;
 	int sample_index;
-	int count1,count2;
+	X_UINT count1;
+	int count2;
+	int cnt_temp = 0;
 	bool start = 1;
 	bool done;
 	bool done_r =0;
 
 
+	float scale_f = (float)(1 << 23);
+	float x_tmp[dr_numFeatures];
+       memset( x_tmp, 0, dr_numFeatures*sizeof(float) );
+    float loss_final;
+
+
+	dimension_algin = (afu_cfg.dimension%64 == 0)? afu_cfg.dimension :(afu_cfg.dimension/64 + 1)*64;
+
 	while(done_r == 0)
 	{
-		sgd_top(afu_cfg,&mem_rd_addr,mem_rd_data,&mem_wr_addr,&mem_wr_data,start,&sample_index,&done,&count1,&count2);
+		//for(int j=0;j<16;j++){
+		//	cout << "mem_rd_data:" << j << "---" << mem_rd_data(j*16+31,j*16) << endl;
+		//}
+		a_rd_data_temp = 0;
+		b_rd_data_temp = 0;
+		a_rd_addr = (a_sample_cnt*dimension_algin/16) + dimension_index_a/2 + bits_index_a;
+		if(!a_rd_data.full() && (epochs_index_a < afu_cfg.number_of_epochs)){
+			for(int j=15;j>=0;j--){
+				if(j==0)
+					a_rd_data_temp = (a_rd_data_temp | a_bitweaving_fpga[a_rd_addr*16+j]);
+				else
+					a_rd_data_temp = (a_rd_data_temp | a_bitweaving_fpga[a_rd_addr*16+j]) << 32;
+				//cout << "a_bitweaving_fpga:" << a_rd_addr*16+j << "---" << a_bitweaving_fpga[a_rd_addr*16+j] << endl;
+
+			}
+			//cout << "a_rd_data_temp:" << a_rd_data_temp << endl;
+			a_rd_data.write(a_rd_data_temp);
+			bits_index_a++;
+			if(bits_index_a == afu_cfg.number_of_bits){
+				bits_index_a = 0;
+				dimension_index_a = dimension_index_a + 64;
+				if(dimension_index_a >= afu_cfg.dimension){
+					dimension_index_a =0;
+					a_sample_cnt = a_sample_cnt + BANK;
+					if(a_sample_cnt >= afu_cfg.number_of_samples){
+						a_sample_cnt = 0;
+						epochs_index_a++;
+					}
+				}
+			}
+		}
+
+
+
+		if(!b_rd_data.full() && (epochs_index_b < afu_cfg.number_of_epochs)){
+			b_rd_addr = (b_sample_cnt>>3);
+			for(int j=7;j>=0;j--){
+				if(j==0)
+					b_rd_data_temp = (b_rd_data_temp | bi_fpga[b_rd_addr*8+j]);
+				else
+					b_rd_data_temp = (b_rd_data_temp | bi_fpga[b_rd_addr*8+j]) << 32;
+				//cout << "bi_fpga:" << (mem_rd_addr-0x20000000)*16+j << "---" << bi_fpga[(mem_rd_addr-0x20000000)*16+j] << endl;
+				//cout << "mem_rd_data:" << j << "---" << mem_rd_data(j*16+31,j*16) << endl;
+			}
+			b_rd_data.write(b_rd_data_temp);
+			b_sample_cnt = b_sample_cnt + BANK;
+			if(b_sample_cnt >= afu_cfg.number_of_samples){
+				b_sample_cnt = 0;
+				epochs_index_b++;
+			}
+		}
+
+		sgd_top(afu_cfg,a_rd_data,b_rd_data,Xupload,start,&sample_index,&done,&count1,&count2);
 		//printf("mem_rd_addr = %d\n", mem_rd_addr);
-		cout << "sample_index:" << sample_index << endl;
-		cout <<"count1: " << count1 << endl;
-		cout <<"count2: " << count2 << endl;
+		//cout << "a_rd_addr:" << a_rd_addr << endl;
+		if(a_rd_addr == 2115){
+			cout<<"daole"<<endl;
+		}
+		//for(int ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.j=0;j<16;j++){
+		//	cout << "mem_rd_data:" << j << "---" << mem_rd_data.range(j*16+31,j*16) << endl;
+		//}
+
+		//cout << "sample_index:" << sample_index << endl;
+		if(count2 > 0){
+			if(cnt_temp == count2){
+			}
+			else{
+				cnt_temp = count2;
+				for(int i=0;i<64;i++){
+					if(count2<1000){
+					cout <<"count1: " << i << " --" << count1.x[i] << endl;
+					}
+				}
+				cout <<"count2: " << count2 << endl;
+			}
+		}
 		if(start){
 			start = 0;
 		}
-		if(mem_rd_addr >= 0x20000000){
-			for(int j=0;j<16;j++){
-				mem_rd_data.range(j*16+31,j*16) = bi_fpga[(mem_rd_addr-0x20000000)*16+j];
+		if(!Xupload.empty()){
+			Xupload.read(x_model_temp);
+			for(int j=0;j<64;j++){
+				x_fpga[x_sample_cnt*64+j] = x_model_temp.x[j];
+				cout << "x_fpga:" << x_model_temp.x[j] << endl;
+			}
+			x_sample_cnt++;
+			cout << "x_sample_cnt:" << x_sample_cnt << endl;
+
+
+			for (int j = 0; j < dr_numFeatures; j++) {
+				x_tmp[j] = (float)(x_fpga[j])/scale_f; //8388608.0  ;
+			}
+
+		    loss_final = calculate_loss(x_tmp);
+
+			cout << "loss_final:" << loss_final << endl;
+		}
+
+
+
+		//float loss_final = calculate_loss(x_tmp);
+
+
+
+		//mem_rd_data = 0;
+		/*if(mem_rd_addr >= 0x20000000){
+			for(int j=15;j>=0;j--){
+				if(j==0)
+					mem_rd_data = (mem_rd_data | bi_fpga[(mem_rd_addr-0x20000000)*16+j]);
+				else
+					mem_rd_data = (mem_rd_data | bi_fpga[(mem_rd_addr-0x20000000)*16+j]) << 32;
+				//cout << "bi_fpga:" << (mem_rd_addr-0x20000000)*16+j << "---" << bi_fpga[(mem_rd_addr-0x20000000)*16+j] << endl;
+				//cout << "mem_rd_data:" << j << "---" << mem_rd_data(j*16+31,j*16) << endl;
 			}
 		}
 		else{
-			for(int j=0;j<16;j++){
-				mem_rd_data.range(j*16+31,j*16) = a_bitweaving_fpga[mem_rd_addr*16+j];
+			for(int j=15;j>=0;j--){
+				if(j==0)
+					mem_rd_data = (mem_rd_data | a_bitweaving_fpga[mem_rd_addr*16+j]);
+				else
+					mem_rd_data = (mem_rd_data | a_bitweaving_fpga[mem_rd_addr*16+j]) << 32;
+				//cout << "a_bitweaving_fpga:" << (mem_rd_addr-0x20000000)*16+j << "---" << a_bitweaving_fpga[mem_rd_addr*16+j] << endl;
+				//cout << "mem_rd_data:" << j << "---" << mem_rd_data.range(j*16+31,j*16) << endl;
 			}
-		}
-		if(mem_wr_addr >= 0x40000000){
-			for(int j=0;j<16;j++){
-				x_fpga[(mem_wr_addr-0x40000000)*16+j] = mem_wr_data.range(j*16+31,j*16);
-			}
-		}
+		}*/
+		//if(mem_wr_addr >= 0x40000000){
+		//	for(int j=0;j<16;j++){
+		//		x_fpga[(mem_wr_addr-0x40000000)*16+j] = mem_wr_data.range(j*16+31,j*16);
+		//	}
+		//}
 		done_r = done;
+		//for(int j=0;j<16;j++){
+		//	cout << "mem_rd_data:" << j << "---" << mem_rd_data(j*32+31,j*32) << endl;
+		//}
+		//cout << "mem_rd_data:" << mem_rd_data << endl;
 		if(done_r==1){
 			cout << done_r << "end------------------------------------------" << endl;
 		}

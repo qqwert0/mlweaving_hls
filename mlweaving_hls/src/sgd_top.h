@@ -25,6 +25,10 @@ struct SGD_PARAM_CONFIG {
 
 };
 struct X_UINT {
-	ap_uint<32> x[64];
+	int x[64];
 };
-void sgd_top(SGD_PARAM_CONFIG param,int* mem_rd_addr,CacheLine mem_rd_data,int* mem_wr_addr,CacheLine* mem_wr_data,bool start,int* sample_index,bool* done,int* count1,int* count2);
+void sgd_top(SGD_PARAM_CONFIG param,
+		stream<CacheLine> &a_rd_data,
+		stream<ap_uint<256> > &b_rd_data,
+		stream<X_UINT> &Xupload,
+		bool start,int* sample_index,bool* done,X_UINT* count1,int* count2);

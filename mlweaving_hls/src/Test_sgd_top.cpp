@@ -37,9 +37,9 @@ using namespace std;
 int main(int argc, char *argv[])
 {
   uint32_t dataset_index         = argc > 1 ? atoi(argv[1]) : 0; //default set to 0...
-  uint32_t exec_model            = argc > 2 ? atoi(argv[2]) : 1; //default set to 0...
+  uint32_t exec_model            = argc > 2 ? atoi(argv[2]) : 0; //default set to 0...
   uint32_t numberOfBits          = argc > 3 ? atoi(argv[3]) : 8; //default set to 0...;
-  uint32_t numberOfIterations    = argc > 4 ? atoi(argv[4]) : 5; //3;
+  uint32_t numberOfIterations    = argc > 4 ? atoi(argv[4]) : 2; //3;
   uint32_t stepSizeShifter       = argc > 5 ? atoi(argv[5]) : 12;//10;
   uint32_t mini_batch_size       = argc > 6 ? atoi(argv[6]) : 8;
   uint32_t num_fractional_bits   = argc > 7 ? atoi(argv[7]) : 23;
@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
   zipml_sgd_pm sgd(usingFPGA, value_to_integer_scaler);
 
 
-  sgd.load_libsvm_data((char*)"D:/mlweaving/mlweaving_hls/mlweaving_hls/abalone_scale", 4177, 8);
+  sgd.load_libsvm_data((char*)"D:/mlweaving/mlweaving_hls/mlweaving_hls/abalone_scale", 8, 8);
 /*  if (dataset_index == 0)
   {
     printf("------Training the dataset: gisette_scale (6000 samples, 5000 features)\n");
@@ -165,6 +165,7 @@ int main(int argc, char *argv[])
     //sgd.numSamples = 100;
     //start = get_time();
 //    sgd.float_linreg_SGD(numberOfIterations, stepSize); //run the CPU-version SGD...
+    sgd.float_linreg_SGD_batch(numberOfIterations, stepSize,mini_batch_size); //run the CPU-version SGD...
 
     //for (int i = 0; i < 10; i++)
     //  printf("x_history1[%d] = %f\n", i, x_history1[i]);
@@ -187,7 +188,7 @@ int main(int argc, char *argv[])
     sgd.bitFSGD(numberOfBits, numberOfIterations, mini_batch_size, stepSizeShifter, 0, 0.0);
     //sgd.floatFSGD(numberOfIterations, stepSize, 0, 0);
 
-    sgd.compute_loss_and_printf(numberOfIterations, num_fractional_bits);
+    //sgd.compute_loss_and_printf(numberOfIterations, num_fractional_bits);
   }
   else if (exec_model == 2)
   {

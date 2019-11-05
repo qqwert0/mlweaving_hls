@@ -810,9 +810,9 @@ void zipml_sgd_pm::a_normalize(void)
 			  	
 			  	dr_a_norm_fp[i*dr_numFeatures + j] = tmp;
 			  	dr_a_norm[i*dr_numFeatures + j]    = (uint32_t) (tmp * 4294967295.0); //4294967296 = 2^32
-			  	cout << "i*dr_numFeatures + j "  << i*dr_numFeatures + j << endl;
+			  	//cout << "i*dr_numFeatures + j "  << i*dr_numFeatures + j << endl;
 			  	//cout << "dr_a "  << dr_a[i*dr_numFeatures + j] << endl;
-			  	cout << "dr_a_norm_fp "  << dr_a_norm_fp[i*dr_numFeatures + j] << endl;
+			  	//cout << "dr_a_norm_fp "  << dr_a_norm_fp[i*dr_numFeatures + j] << endl;
 			  	//cout << "dr_a_norm "  << dr_a_norm[i*dr_numFeatures + j] << endl;
 /*
 				uint32_t tmp_buffer[4];
@@ -899,8 +899,8 @@ void zipml_sgd_pm::a_perform_bitweaving_fpga(void) {
 
 
     //Compute the bytes for samples: Number of bytes for one CL        CLs                Samples
-    uint64_t num_bytes_for_samples = num_Bytes_per_sample * dr_numSamples; //512;//
-
+    //uint64_t num_bytes_for_samples = num_Bytes_per_sample * dr_numSamples; //512;//
+    uint64_t num_bytes_for_samples = (dr_numSamples%8 == 0) ? num_Bytes_per_sample * dr_numSamples : num_Bytes_per_sample * (dr_numSamples/8+1)*8; //512;//
     //printf("3 in a_perform_bitweaving_fpga\n");
     //sleep(1);
     
@@ -997,6 +997,7 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 
     printf("before step_shifter = %d\n", stepSize);
     uint32_t mini_batch_size_tmp = mini_batch_size;
+
     while (mini_batch_size_tmp >>= 1)
     	stepSize++;
     printf("after step_shifter = %d\n", stepSize);
@@ -1008,7 +1009,7 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
     afu_cfg.step_size               = stepSize;             //1/2^stepSize to the
     afu_cfg.number_of_epochs        = numberOfIterations;
     afu_cfg.dimension               = dr_numFeatures;       // add the predicator "b"
-    afu_cfg.number_of_samples       = dr_numSamples;        // 1;
+    afu_cfg.number_of_samples       = (dr_numSamples/mini_batch_size)*mini_batch_size;        // 1;
     afu_cfg.number_of_bits          = number_of_bits;		 // doGather; No use of this feature, since the data is from the same dataset.
     afu_cfg.learning_rate			= 1;
     //afu_cfg->binarize_b_value        = 0;
@@ -1016,10 +1017,10 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
     //afu_cfg->gather_depth            = 0;                    //gatherDepth: No use of this feature.
 	//afu_cfg->number_of_CL_to_process = 1;                    //No use of this feature. Can be replaced.
 
-	for(int i=0;i<100;i++){
-		cout << "a_bitweaving_fpga" << i << ":" << a_bitweaving_fpga[i] << endl;
-		cout << "bi_fpga:" << bi_fpga[i] << endl;
-	}
+	//for(int i=0;i<100;i++){
+		//cout << "a_bitweaving_fpga" << i << ":" << a_bitweaving_fpga[i] << endl;
+		//cout << "bi_fpga:" << bi_fpga[i] << endl;
+	//}
 	//printf("x_fpga = %d\n", x_fpga[1]);
     printf("a_bitweaving_fpga = %d\n", a_bitweaving_fpga);
     printf("bi_fpga = %d\n", bi_fpga);
@@ -1059,6 +1060,7 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 	bool start = 1;
 	bool done;
 	bool done_r =0;
+	int count=0;
 
 
 	float scale_f = (float)(1 << 23);
@@ -1069,7 +1071,7 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 
 	dimension_algin = (afu_cfg.dimension%64 == 0)? afu_cfg.dimension :(afu_cfg.dimension/64 + 1)*64;
 
-	while(done_r == 0)
+	while(done_r == 0)//for(int g=0;g<8000000;g++)
 	{
 		//for(int j=0;j<16;j++){
 		//	cout << "mem_rd_data:" << j << "---" << mem_rd_data(j*16+31,j*16) << endl;
@@ -1113,7 +1115,7 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 				else
 					b_rd_data_temp = (b_rd_data_temp | bi_fpga[b_rd_addr*8+j]) << 32;
 				//cout << "bi_fpga:" << (mem_rd_addr-0x20000000)*16+j << "---" << bi_fpga[(mem_rd_addr-0x20000000)*16+j] << endl;
-				//cout << "mem_rd_data:" << j << "---" << mem_rd_data(j*16+31,j*16) << endl;
+				//cout << "mem_rd_data:" << j << "---" << b_rd_data_temp << endl;
 			}
 			b_rd_data.write(b_rd_data_temp);
 			b_sample_cnt = b_sample_cnt + BANK;
@@ -1124,10 +1126,11 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 		}
 
 		sgd_top(afu_cfg,a_rd_data,b_rd_data,Xupload,start,&sample_index,&done,&count1,&count2);
+		count++;
 		//printf("mem_rd_addr = %d\n", mem_rd_addr);
 		//cout << "a_rd_addr:" << a_rd_addr << endl;
 		if(a_rd_addr == 2115){
-			cout<<"daole"<<endl;
+			//cout<<"daole"<<endl;
 		}
 		//for(int ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.j=0;j<16;j++){
 		//	cout << "mem_rd_data:" << j << "---" << mem_rd_data.range(j*16+31,j*16) << endl;
@@ -1139,25 +1142,29 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 			}
 			else{
 				cnt_temp = count2;
-				for(int i=0;i<64;i++){
-					if(count2<1000){
-					cout <<"count1: " << i << " --" << count1.x[i] << endl;
-					}
+				//cout <<"count2: " << count2 << endl;
+				for(int i=0;i<8;i++){
+					//if(count2<1000){
+					//cout <<"count1: " << i << " --" << (float)(count1.x)[i]/scale_f << endl;
+					//}
 				}
-				cout <<"count2: " << count2 << endl;
+
 			}
 		}
-		if(start){
-			start = 0;
-		}
+		//if(start){
+			//start = 0;
+		//}
 		if(!Xupload.empty()){
+			start = 0;
+			if(x_sample_cnt == (dimension_algin/64))
+				x_sample_cnt = 0;
 			Xupload.read(x_model_temp);
 			for(int j=0;j<64;j++){
 				x_fpga[x_sample_cnt*64+j] = x_model_temp.x[j];
-				cout << "x_fpga:" << x_model_temp.x[j] << endl;
+				///cout << "x_fpga:" << x_model_temp.x[j] << endl;
 			}
 			x_sample_cnt++;
-			cout << "x_sample_cnt:" << x_sample_cnt << endl;
+			//cout << "x_sample_cnt:" << x_sample_cnt << endl;
 
 
 			for (int j = 0; j < dr_numFeatures; j++) {
@@ -1165,8 +1172,10 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 			}
 
 		    loss_final = calculate_loss(x_tmp);
-
+		    if(x_sample_cnt == (dimension_algin/64)){
 			cout << "loss_final:" << loss_final << endl;
+			cout << "count:" << count << endl;
+		    }
 		}
 
 
@@ -1201,13 +1210,13 @@ void zipml_sgd_pm::bitFSGD(uint32_t number_of_bits, uint32_t numberOfIterations,
 		//		x_fpga[(mem_wr_addr-0x40000000)*16+j] = mem_wr_data.range(j*16+31,j*16);
 		//	}
 		//}
-		done_r = done;
 		//for(int j=0;j<16;j++){
 		//	cout << "mem_rd_data:" << j << "---" << mem_rd_data(j*32+31,j*32) << endl;
 		//}
 		//cout << "mem_rd_data:" << mem_rd_data << endl;
-		if(done_r==1){
+		if(done==1 && done_r == 0){
 			cout << done_r << "end------------------------------------------" << endl;
+			done_r = 1;
 		}
 	}
 
@@ -1285,6 +1294,7 @@ void zipml_sgd_pm::float_linreg_SGD(uint32_t numberOfIterations, float stepSize)
 void zipml_sgd_pm::float_linreg_SGD_batch(uint32_t numberOfIterations, float stepSize, int mini_batch_size) {
 
 	dr_numFeatures_algin = ((dr_numFeatures+63)&(~63));
+	float temp;
     x = (float *) malloc(sizeof(float)*numberOfIterations * dr_numFeatures_algin ); //numFeatures
 
     float x_tmp[dr_numFeatures_algin];
@@ -1318,13 +1328,19 @@ void zipml_sgd_pm::float_linreg_SGD_batch(uint32_t numberOfIterations, float ste
 				for (int j = 0; j < dr_numFeatures; j++) 
 					dot += x_tmp[j]*dr_a_norm_fp[(i+k)*dr_numFeatures + j];
 
-				for (int j = 0; j < dr_numFeatures; j++) 
+				for (int j = 0; j < dr_numFeatures; j++){
 					x_gradient[j] += stepSize_in_use*(dot - dr_b[i+k])*dr_a_norm_fp[(i+k)*dr_numFeatures + j];
+					//temp = x_gradient[j]*8388608;
+					//cout << "x_gradient feature"  << j << "sample" << i+k << "--:"<< temp << endl;
+				}
 			}
 
 			///update the model with the computed gradient..
-			for (int k = 0; k < dr_numFeatures_algin; k++) 
+			for (int k = 0; k < dr_numFeatures_algin; k++){
 				x_tmp[k] -= x_gradient[k];
+				//if(k<8)
+				//cout << "x_tmp"  << k <<  "--:"<< x_tmp[k] << endl;
+			}
 		}
 
 

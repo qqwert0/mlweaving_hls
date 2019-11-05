@@ -79,7 +79,6 @@ void rd_mem(SGD_PARAM_CONFIG param,
 				//*mem_addr = param.addr_a + (sample_index*dimension_algin/16) + dimension_index/2 + bits_index;
 				RdMemFsmState = READ_A;
 			}
-
 		}
 		else{
 			RdMemFsmState = READ_A;
@@ -110,17 +109,16 @@ void dot_product(SGD_PARAM_CONFIG param,
 		stream<ap_uint<512> >&  ADataFifo,
 		stream<ap_uint<512> >&  A2DataFifo,
 		stream<ap_uint<256> >&  QFifo,
-		X_UINT x[512] ,
+		//X_UINT x[512] ,
+		stream<X_UINT> &XFifo,
 		bool start,
-		int &sample_index,
-		X_UINT* count1,
-		int* count2
+		int &sample_index
 		)
 {
-#pragma HLS ARRAY_RESHAPE variable=x complete dim=2
+//#pragma HLS ARRAY_RESHAPE variable=x complete dim=2
 #pragma HLS pipeline
 
-	enum DotProductFsmStateType {IDLE, START, CALC, JUDGE, EPOCH_END, FSM_END};
+	enum DotProductFsmStateType {IDLE, START, CALC, JUDGE, READ_X, EPOCH_END, FSM_END};
 	static DotProductFsmStateType DotProductState = IDLE;
 	static int epochs_index;
 	static int batch_index;
@@ -130,15 +128,17 @@ void dot_product(SGD_PARAM_CONFIG param,
 	static int bit_index;
 	static ap_uint<256> Q;
 	static ap_uint<512> ADataTemp;
+	static X_UINT x_temp;
 
 	//static int Q[8];
-//#pragma HLS ARRAY_RESHAPE variable=Q complete dim=1
+#pragma HLS ARRAY_RESHAPE variable=x_temp complete dim=1
 
 
 	switch (DotProductState)
 	{
 	case IDLE:
-		if(start){
+		if(start && !XFifo.empty()){
+			x_temp = XFifo.read();
 			DotProductState = START;
 			epochs_index = 0;
 			batch_index = 0;
@@ -146,7 +146,7 @@ void dot_product(SGD_PARAM_CONFIG param,
 			dimension_index = 0;
 			bits_index = 0;
 			bit_index = 0;
-			//count2 = 0;
+			//*count2 = 0;
 			//count1 = 0;
 		}
 		break;
@@ -164,8 +164,8 @@ void dot_product(SGD_PARAM_CONFIG param,
 	case CALC:
 		for(int i=0;i< BANK;i++){
 #pragma HLS unroll factor=8
-			//Q[i] = Q[i] + ADataTemp[i*64+bit_index] * (x[dimension_index/64][bit_index]>>bits_index);
-			Q.range(i*32+31,i*32) = Q.range(i*32+31,i*32) + ADataTemp[i*64+bit_index] * (x[dimension_index/64].x[bit_index]>>bits_index);
+			//Q.range(i*32+31,i*32) = Q.range(i*32+31,i*32) + ADataTemp[i*64+bit_index] * (x[dimension_index/64].x[bit_index]>>bits_index);
+			Q.range(i*32+31,i*32) = Q.range(i*32+31,i*32) + ADataTemp[i*64+bit_index] * (x_temp.x[bit_index]>>bits_index);
 			/*Q(31,0) = Q(31,0) + ADataTemp[bit_index] * (x[dimension_index/64][bit_index]>>bits_index);
 			Q(63,32) = Q(63,32) + ADataTemp[64+bit_index] * (x[dimension_index/64][bit_index]>>bits_index);
 			Q(95,64) = Q(95,64) + ADataTemp[128+bit_index] * (x[dimension_index/64][bit_index]>>bits_index);
@@ -189,14 +189,15 @@ void dot_product(SGD_PARAM_CONFIG param,
 		if(bits_index == param.number_of_bits){
 			bits_index = 0;
 			dimension_index = dimension_index + 64;
-			DotProductState = START;
+			//*count2 = *count2 + 1;
+			DotProductState = READ_X;
 			if(dimension_index >= param.dimension){
 				sample_index = sample_index + BANK;
 				dimension_index =0;
 				QFifo.write(Q);
-				*count2 = *count2 + 1;
+				//*count2 = *count2 + 1;
 				Q = 0;
-				DotProductState = START;
+				DotProductState = READ_X;
 				if(sample_index >= param.number_of_samples){
 					DotProductState = EPOCH_END;
 				}
@@ -206,6 +207,16 @@ void dot_product(SGD_PARAM_CONFIG param,
 			DotProductState = START;
 		}
 		break;
+	case READ_X:
+		if(!XFifo.empty()){
+			x_temp = XFifo.read();
+			//*count2 = *count2 + 1;
+			DotProductState = START;
+		}
+		else{
+			DotProductState = READ_X;
+		}
+		break;
 	case EPOCH_END:
 		if(epochs_index == param.number_of_epochs-1){
 			DotProductState = FSM_END;
@@ -213,7 +224,7 @@ void dot_product(SGD_PARAM_CONFIG param,
 			sample_index = 0;
 		}
 		else{
-			DotProductState = START;
+			DotProductState = READ_X;
 			sample_index = 0;
 			epochs_index++;
 		}
@@ -236,13 +247,17 @@ void serial_loss(SGD_PARAM_CONFIG param,
 	static ap_uint<256> Q;
 	static ap_uint<256> scale;
 	static int scale_temp;
+	static int dot_temp;
+	static int b_temp;
 	if(!BDataFifo.empty() && !QFifo.empty()){
 		BDataFifo.read(b);
 		QFifo.read(Q);
 		//count2++;
 		for(int i = 0;i < BANK; i++){
 #pragma HLS unroll factor=8
-			scale_temp = (Q(i*32+31,i*32) - b(i*32+31,i*32))>>12;
+			dot_temp = Q(i*32+31,i*32);
+			b_temp = b(i*32+31,i*32);
+			scale_temp = (dot_temp - b_temp)>>param.step_size;
 			scale.range(i*32+31,i*32) =  scale_temp ;//计算每个参数的rate*(h(a)-b)
 			 /*scale(31,0) =  param.learning_rate * (Q(31,0) - b(31,0)) ;
 			scale(63,32) =  param.learning_rate * (Q(63,32) - b(63,32)) ;
@@ -331,7 +346,6 @@ void gradient(SGD_PARAM_CONFIG param,
 		//*count1 = G;
 		bank_index++;
 		if(bank_index == 8){
-
 			GradientState=JUDGE;
 			bank_index = 0;
 		}
@@ -391,7 +405,7 @@ void updata_x(SGD_PARAM_CONFIG param,
 //#pragma HLS ARRAY_RESHAPE variable=x complete dim=2
 //#pragma HLS ARRAY_RESHAPE variable=x_updata complete dim=2
 #pragma HLS dependence variable=x_updata inter false
-#pragma HLS dependence variable=x inter false
+//#pragma HLS dependence variable=x inter false
 	//static int wr_dimension_index = 0;
 	static int rd_dimension_index = 0;
 	static int wr_dimension_index = 0;
@@ -406,7 +420,7 @@ void updata_x(SGD_PARAM_CONFIG param,
 		GFifo.read(G);
 		for(int i=0;i<64;i++){
 #pragma HLS unroll factor=64
-			x_updata_temp2.x[i] = x_updata_temp1.x[i] - G.x[i]/param.mini_batch_size;
+			x_updata_temp2.x[i] = x_updata_temp1.x[i] - G.x[i];
 		}
 		//*count2 = *count2 +1;
 		//*count1 = x_updata_temp2;
@@ -431,15 +445,17 @@ void updata_x(SGD_PARAM_CONFIG param,
 void wr_x(SGD_PARAM_CONFIG param,
 		X_UINT x[512],
 		stream<X_UINT> &XupdataFifo,
-		//stream<X_UINT> &XFifo,
+		stream<X_UINT> &XFifo,
 		stream<X_UINT> &Xupload,
 		bool start,
-		bool& done
+		bool& done,
+		X_UINT* count1,
+		int* count2
 		){
 #pragma HLS pipeline
 #pragma HLS ARRAY_RESHAPE variable=x complete dim=2
 #pragma HLS dependence variable=x inter false
-	enum WrxFsmStateType {IDLE, START, UPDATA_X, JUDGE, EPOCH_END, FSM_END};
+	enum WrxFsmStateType {IDLE, START, UPDATA_X, WRITE_X, JUDGE, EPOCH_END, FSM_END};
 	static WrxFsmStateType WrxState = IDLE;
 	static int epochs_index;
 	static int batch_index;
@@ -448,6 +464,7 @@ void wr_x(SGD_PARAM_CONFIG param,
 	static int dimension_algin = 0;
 	static X_UINT x_updata_temp;
 	static X_UINT x_temp;
+#pragma HLS DATA_PACK variable=x_temp
 	switch (WrxState)
 	{
 	case IDLE:
@@ -457,36 +474,53 @@ void wr_x(SGD_PARAM_CONFIG param,
 			sample_index = 0;
 			batch_index = 0;
 			dimension_index = 0;
-			//count1 = 0;
+			//*count2 = 0;
 			done = 0;
 			dimension_algin = (param.dimension%64 == 0)? param.dimension :(param.dimension/64 + 1)*64;
-			//for(int i=0;i<64;i++){
-			//	x_temp.x[i] = 0;
-			//}
+			for(int i=0;i<64;i++){
+#pragma HLS unroll factor=64
+				x_temp.x[i] = 0;
+			}
 		}
 		break;
 	case START:
-		//XFifo.write(x_temp);
-		//dimension_index = dimension_index + 64;
-		//if(dimension_index >= dimension_algin){
-			WrxState = UPDATA_X;
-		//}
-		//else{
-		//	WrxState = START;
-		//}
+		if(!XFifo.full()){
+			XFifo.write(x_temp);
+			dimension_index = dimension_index + 64;
+			//*count2 = *count2 +1;
+			if(dimension_index >= dimension_algin){
+				dimension_index = 0;
+				batch_index = batch_index + BANK;
+				if(batch_index >= param.mini_batch_size){
+					batch_index = 0;
+					WrxState = UPDATA_X;
+				}
+				else{
+					WrxState = START;
+				}
+			}
+			else{
+				WrxState = START;
+			}
+		}
+		else{
+			WrxState = START;
+		}
 		break;
 	case UPDATA_X:
 		if(!XupdataFifo.empty()){
 			XupdataFifo.read(x_updata_temp);
 			x[dimension_index/64] = x_updata_temp;
+			//*count1 = x_updata_temp;
+			//*count2 = *count2 +1;
 			//XFifo.write(x_updata_temp);
-			if((epochs_index == param.number_of_epochs-1) && (sample_index >= param.number_of_samples-BANK)){
+			if((sample_index >= param.number_of_samples-param.mini_batch_size)){//(epochs_index == param.number_of_epochs-1) &&
 				Xupload.write(x_updata_temp);
 			}
 			dimension_index = dimension_index + 64;
 			if(dimension_index >= dimension_algin){
 				dimension_index = 0;
-				sample_index = sample_index + BANK;
+				sample_index = sample_index + param.mini_batch_size;
 				WrxState=JUDGE;
 			}
 			else{
@@ -503,7 +537,7 @@ void wr_x(SGD_PARAM_CONFIG param,
 			WrxState=EPOCH_END;
 		}
 		else{
-			WrxState=UPDATA_X;
+			WrxState=WRITE_X;
 		}
 		break;
 	case EPOCH_END:
@@ -512,8 +546,33 @@ void wr_x(SGD_PARAM_CONFIG param,
 			epochs_index = 0;
 		}
 		else{
-			WrxState = UPDATA_X;
+			WrxState = WRITE_X;
 			epochs_index++;
+		}
+		break;
+	case WRITE_X:
+		if(!XFifo.full()){
+			x_temp = x[dimension_index/64];
+			XFifo.write(x_temp);
+			//*count2 = *count2 +1;
+			dimension_index = dimension_index + 64;
+			if(dimension_index >= dimension_algin){
+				dimension_index = 0;
+				batch_index = batch_index + BANK;
+				if(batch_index >= param.mini_batch_size){
+					batch_index = 0;
+					WrxState = UPDATA_X;
+				}
+				else{
+					WrxState = WRITE_X;
+				}
+			}
+			else{
+				WrxState = WRITE_X;
+			}
+		}
+		else{
+			WrxState = WRITE_X;
 		}
 		break;
 	case FSM_END:
@@ -567,9 +626,9 @@ void sgd_top(SGD_PARAM_CONFIG param,
 	  #pragma HLS STREAM variable=XupdataFifo depth=4
 	  #pragma HLS DATA_PACK variable=XupdataFifo
 
-	  //static hls::stream<X_UINT >     XFifo("XFifo");
-	  //#pragma HLS STREAM variable=XFifo depth=4
-	  //#pragma HLS DATA_PACK variable=XFifo
+	  static hls::stream<X_UINT >     XFifo("XFifo");
+	  #pragma HLS STREAM variable=XFifo depth=4
+	  #pragma HLS DATA_PACK variable=XFifo
 
 	//static ap_uint<32> x[512][64];
 	//static ap_uint<32> x_updata[512][64];
@@ -584,7 +643,7 @@ void sgd_top(SGD_PARAM_CONFIG param,
 
 	rd_mem(param,a_rd_data,b_rd_data,BDataFifo,ADataFifo,start);
 
-	dot_product(param,ADataFifo,A2DataFifo,QFifo,x,start,*sample_index,count1,count2);
+	dot_product(param,ADataFifo,A2DataFifo,QFifo,XFifo,start,*sample_index);
 
 	serial_loss(param,BDataFifo,QFifo,scaleFifo);
 
@@ -592,6 +651,6 @@ void sgd_top(SGD_PARAM_CONFIG param,
 
 	updata_x(param,GFifo,x_updata,XupdataFifo);
 
-	wr_x(param,x,XupdataFifo,Xupload,start,*done);
+	wr_x(param,x,XupdataFifo,XFifo,Xupload,start,*done,count1,count2);
 
 }

@@ -39,9 +39,9 @@ int main(int argc, char *argv[])
   uint32_t dataset_index         = argc > 1 ? atoi(argv[1]) : 0; //default set to 0...
   uint32_t exec_model            = argc > 2 ? atoi(argv[2]) : 0; //default set to 0...
   uint32_t numberOfBits          = argc > 3 ? atoi(argv[3]) : 8; //default set to 0...;
-  uint32_t numberOfIterations    = argc > 4 ? atoi(argv[4]) : 2; //3;
+  uint32_t numberOfIterations    = argc > 4 ? atoi(argv[4]) : 10; //3;
   uint32_t stepSizeShifter       = argc > 5 ? atoi(argv[5]) : 12;//10;
-  uint32_t mini_batch_size       = argc > 6 ? atoi(argv[6]) : 8;
+  uint32_t mini_batch_size       = argc > 6 ? atoi(argv[6]) : 16;
   uint32_t num_fractional_bits   = argc > 7 ? atoi(argv[7]) : 23;
   uint32_t nthreads              = argc > 8 ? atoi(argv[8]) : 1;
   uint32_t targeted_label        = argc > 9 ? atoi(argv[9]) : 1;
@@ -68,7 +68,11 @@ int main(int argc, char *argv[])
   zipml_sgd_pm sgd(usingFPGA, value_to_integer_scaler);
 
 
-  sgd.load_libsvm_data((char*)"D:/mlweaving/mlweaving_hls/mlweaving_hls/abalone_scale", 8, 8);
+  sgd.load_libsvm_data((char*)"D:/mlweaving/mlweaving_hls_1/mlweaving/src/abalone_scale", 4177, 8);
+  //sgd.load_libsvm_data((char*)"D:/mlweaving/mlweaving_hls_1/mlweaving/src/usps", 7291, 256);
+  //sgd.load_libsvm_data((char*)"D:/mlweaving/mlweaving_hls_1/mlweaving/src/seismic_scale", 78823, 50);
+  //sgd.load_libsvm_data((char*)"D:/mlweaving/mlweaving_hls_1/mlweaving/src/combined_scale", 78823, 100);
+  //sgd.load_libsvm_data((char*)"C:/proj/mlweaving/mlweaving_hls/src/usps", 7291, 256);
 /*  if (dataset_index == 0)
   {
     printf("------Training the dataset: gisette_scale (6000 samples, 5000 features)\n");
